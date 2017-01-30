@@ -1,2 +1,10 @@
 # lupinus  
-Another implementation of Mustache  
+Yet another implementation of Mustache  
+
+     ∩
+    ⊂○⊃　∩
+     ∪　⊂○⊃
+    ＼│　　∪
+
+###License  
+MIT License  
