@@ -2,12 +2,16 @@
 require "cgi"
 
 module StringExtensions
-refine String do
-  def strip_char(chars)
-    chars = Regexp.escape(chars)
-    self.gsub(/\A[#{chars}]+|[#{chars}]+\z/, "")
+  refine String do
+    def strip(chars=nil)
+      if chars
+        chars = Regexp.escape(chars)
+        self.gsub(/\A[#{chars}]+|[#{chars}]+\z/, "")
+      else
+        super()
+      end
+    end
   end
-end
 end
 
 
@@ -101,16 +105,12 @@ def compiled(template, delimiters=$DEFAULT_DELIMITERS)
     strip_space = false
 
     if m.begin(0) > index
-      print '#' * 10, m.begin(0), '#' * 10 , index, "\n"
-      # puts '+' * 50, template[index, m.begin(0)-1]
-      # puts '+' * 50
-      last_literal = Literal.new("str", template[index..m.begin(0)], root=root)
-      print '%' * 10, template[index,m.begin(0)], '%' * 10,"\n"
+      last_literal = Literal.new("str", template[index..m.begin(0)-1], root=root)
+
       tokens << last_literal
     end
 
     prefix, name, suffix = m.captures()
-    print prefix,name,suffix,"\n"
 
     if prefix == "=" && suffix == "="
       delimiters = name.split(/\s+/)
@@ -182,17 +182,14 @@ def compiled(template, delimiters=$DEFAULT_DELIMITERS)
       if pos
         index = pos[1]
         if last_literal
-          last_literal.value = last_literal.value.strip_char($spaces_not_newline)
+          last_literal.value = last_literal.value.strip($spaces_not_newline)
         end
       end
     end
     m = re_tag.match(template, index)
   end
   tokens << Literal.new("str", template[index..-1])
-  for i in tokens
-    puts i
-    puts '-' * 10
-  end
+
   root.children = tokens
   return root
 end
@@ -264,7 +261,7 @@ class Token
       if path == ".."
         level = level - 1
       elsif path != "."
-        level = level + path.strip_char(".").split(".").length
+        level = level + path.strip(".").split(".").length
       end
     end
 
@@ -505,3 +502,4 @@ EOF
 
 context = JSON.parse(context_text)
 puts render(template_text, context) 
+
