@@ -135,7 +135,7 @@ class Lupinus
         if prefix == "#"
           token = Section.new(sec_name, name, root=root)
         else
-          Inverted.new(name, name, root=root)
+          token = Inverted.new(name, name, root=root)
         end
         token.delimiter = delimiters
         tokens << token
@@ -492,3 +492,20 @@ context_text = <<~EOF
 EOF
 context = JSON.parse(context_text)
 puts Lupinus.render(template_text, context) 
+template_text = <<~EOF
+{{#repo}}
+  <b>{{name}}</b>
+{{/repo}}
+{{^repo}}
+  No repos :(
+{{/repo}}
+EOF
+
+context_text = <<~EOF
+{
+  "repo": []
+}
+EOF
+context = JSON.parse(context_text)
+puts Lupinus.render(template_text, context) 
+
