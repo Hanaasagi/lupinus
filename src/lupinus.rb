@@ -34,7 +34,7 @@ class Lupinus
   $filters['capitalize'] = lambda {|s| s.capitalize}
 
 
-  def self.render(template, context, partials)
+  def self.render(template, context, partials={})
     new.render(template, context, partials)
   end
 
@@ -342,9 +342,6 @@ class Lupinus
 
     def render(contexts, partials)
       value = _look_up(@value, contexts)
-      if (defined? value) == "method"
-        value = Render::render(value(), contexts, partials)
-      end
       return escape(value)
     end
 
@@ -358,31 +355,26 @@ class Lupinus
     end
 
     def render(contexts, partials)
-      val = _look_up(@value, contexts)
-      if not val
+      var = _look_up(@value, contexts)
+      if not var
         return $EMPTYSTRING
       end
-
-      if val.instance_of? Array
-        rtn = []
-        for item in val
+      
+      rtn = []
+      if var.instance_of? Array
+        for item in var
           contexts << item
           rtn << render_child(contexts, partials)
           contexts.pop
         end
-        if rtn.length <= 0
-          return $EMPTYSTRING
-        end
-        return escape(rtn.join(""))
-      elsif (defined? val) == "method"
-        new_template = val(@text)
-        value = Render::render(new_template, contexts, partials)
       else
-        contexts << val
-        value = render_child(contexts, partials)
+        contexts << var
+        rtn << render_child(contexts, partials)
         contexts.pop
       end
-      return escape(value)
+      # [].join => ""
+      # ['item'].join => "item"
+      return escape(rtn.join)
     end
 
   end
@@ -395,11 +387,11 @@ class Lupinus
     end
 
     def render(contexts, partials)
-      val = _look_up(@value, contexts)
-      if val
-        return $EMPTYSTRING
+      var = _look_up(@value, contexts)
+      if var === false or var === [] or var === {}
+        return render_child(contexts, partials)
       end
-      return render_child(contexts, partials)
+      return $EMPTYSTRING
     end
 
   end
@@ -434,9 +426,6 @@ class Lupinus
   end
 
 end
-
-
-
 
 
 
@@ -481,21 +470,23 @@ context = JSON.parse(context_text)
 puts Lupinus.render(template_text, context,{'hello'=>'{{name}}'}) 
 
 
+print '-' * 10, 'END', '-' * 10, "\n"
 
-# template_text = <<~EOF
-# {{#repo}}
-#   <b></b>
-# {{/repo}}
-# {{!repo}}
-#   No repos :(
-# {{/repo}}
-# EOF
+template_text = <<~EOF
+{{#repo}}
+  <b></b>
+{{/repo}}
+{{!repo}}
+  No repos :(
+{{/repo}}
+EOF
 
-# context_text = <<~EOF
-# {
-#   "repo": []
-# }
-# EOF
-# context = JSON.parse(context_text)
-# puts Lupinus.render(template_text, context) 
+context_text = <<~EOF
+{
+  "repo": []
+}
+EOF
+
+context = JSON.parse(context_text)
+puts Lupinus.render(template_text, context) 
 
