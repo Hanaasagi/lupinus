@@ -27,28 +27,33 @@ class Lupinus
 
   $re_space = Regexp.new("[" + $WHITESPACE + "]*(\n|$)")
   $re_tag = Regexp.new(format('%s([;#/!>r{]?)\s*(.*?)\s*([}]?)%s', *$DEFAULT_DELIMITERS), Regexp::MULTILINE)
-  $filters = {}
 
-  def self.render(*arg, **kwargs)
-    new.render(*arg, **kwargs)
+  $filters = {}
+  $filters['upcase'] = lambda {|s| s.upcase}
+  $filters['downcase'] = lambda {|s| s.downcase}
+  $filters['capitalize'] = lambda {|s| s.capitalize}
+
+
+  def self.render(template, context, partials)
+    new.render(template, context, partials)
   end
 
-  def render(template, context, partials={}, delimiters=nil)
+  def render(template, context, partials)
     contexts = [context]
 
     if not partials.instance_of? Hash
       raise Exception
     end
 
-    Render::inner_render(template, contexts, partials, delimiters)
+    Render::inner_render(template, contexts, partials)
   end
 
   class Render
 
-    def self.inner_render(template, contexts, partials={}, delimiters=nil)
+    def self.inner_render(template, contexts, partials)
       delimiters = delimiters ? delimiters : $DEFAULT_DELIMITERS
-      parent_token = compiled(template, delimiters)
-      parent_token._render(contexts, partials)
+      root = compiled(template, delimiters)
+      root._render(contexts, partials)
     end
 
     def self.standalone?(text, start, end_)
@@ -142,11 +147,11 @@ class Lupinus
           if tag_name != name
             raise SyntaxError, ""
           end
-          children = tokens
+          child = tokens
           tokens = tokens_stack.pop()
 
           tokens[-1].text = template[text_end, m.begin(0)]
-          tokens[-1].children = children
+          tokens[-1].child = child
           strip_space = true
         
         else
@@ -173,7 +178,7 @@ class Lupinus
 
       tokens << Literal.new("str", template[index..-1])
 
-      root.children = tokens
+      root.child = tokens
       return root
     end
   end
@@ -192,16 +197,19 @@ class Lupinus
     return nil
   end
 
+  ##################################################
+  #############    Token Base Class    #############
+  ##################################################
   class Token
 
-    attr_accessor :filters, :name, :value, :text, :children, \
+    attr_accessor :filters, :name, :value, :text, :child, \
                   :escape, :delimiter, :indent, :root
     
-    def initialize(name, value=nil, text="", children=nil, root=nil)
+    def initialize(name, value=nil, root=nil, child=nil, text="")
       @name = name
       @value = value
       @text = text
-      @children = children
+      @child = child
       @escape = false
       @delimiter = nil
       @indent = 0
@@ -268,49 +276,30 @@ class Lupinus
       end
 
       for f in filters
-        begin
+        if @root.filters.has_key? f
           func = @root.filters[f]
-          value = func(value)
-        rescue
-          next
+          begin
+            value = func.call value
+          rescue
+            raise Exception
+          end
         end
       end
 
       return value
     end
 
-    def _render_children(contexts, partials)
+    def exec_filter(value, filters)
+
+    end
+
+    def render_child(contexts, partials)
       rtn = []
-      for child in @children
+      for child in @child
 
         rtn << child._render(contexts, partials)
       end
       return rtn.join
-    end
-
-    def _get_str(indent)
-      rtn = []
-      rtn << " " * indent + "[("
-      rtn << @type_string
-      rtn << ","
-      rtn << @name
-      if @value
-        rtn << ","
-        rtn << @value
-      end
-      rtn << ")"
-      if @children
-        for c in @children
-          rtn << "\n"
-          rtn << c._get_str(indent+4)
-        end
-      end
-      rtn << "]"
-      return rtn.join("")
-    end
-
-    def to_s
-      return _get_str(0)
     end
 
     def render(contexts, partials={})
@@ -321,21 +310,23 @@ class Lupinus
 
   class Root < Token
 
-    def initialize(*args, **kwargs)
-      super(*args, **kwargs)
+    def initialize(*args)
+      super(*args)
       @type_string = "R"
     end
 
     def _render(contexts, partials)
-      return _render_children(contexts, partials)
+      return render_child(contexts, partials)
     end
   end
 
   class Literal < Token
+
     def initialize(*arg)
       super(*arg)
       @type_string = "L"
     end
+
     def _render(contexts, partials)
       return escape(@value)
     end
@@ -343,8 +334,8 @@ class Lupinus
 
   class Variable < Token
 
-    def initialize(*args, **kwargs)
-      super(*args, **kwargs)
+    def initialize(*args)
+      super(*args)
       @type_string = "V"
     end
 
@@ -360,8 +351,8 @@ class Lupinus
 
   class Section < Token
 
-    def initialize(*args, **kwargs)
-      super(*args, **kwargs)
+    def initialize(*args)
+      super(*args)
       @type_string = "S"
     end
 
@@ -375,7 +366,7 @@ class Lupinus
         rtn = []
         for item in val
           contexts << item
-          rtn << _render_children(contexts, partials)
+          rtn << render_child(contexts, partials)
           contexts.pop
         end
         if rtn.length <= 0
@@ -384,10 +375,10 @@ class Lupinus
         return escape(rtn.join(""))
       elsif (defined? val) == "method"
         new_template = val(@text)
-        value = inwner_render(new_template, contexts, partials, @delimiter)
+        value = inner_render(new_template, contexts, partials)
       else
         contexts << val
-        value = _render_children(contexts, partials)
+        value = render_child(contexts, partials)
         contexts.pop
       end
       return escape(value)
@@ -406,7 +397,7 @@ class Lupinus
       if val
         return $EMPTYSTRING
       end
-      return _render_children(contexts, partials)
+      return render_child(contexts, partials)
     end
   end
 
@@ -433,7 +424,7 @@ class Lupinus
       partial = partials[@value]
 
       # !!!
-      return Render::inner_render(partial, contexts, partials, @delimiter)
+      return Render::inner_render(partial, contexts, partials)
     end
   end
 end
@@ -453,7 +444,7 @@ template_text = <<~EOF
 
 {{# items }}
   {{# first }}
-    <li><strong>{{name}}</strong></li>
+    <li><strong>{{name | upcase}}</strong></li>
   {{/ first }}
   {{# link }}
     <li><a href="{{url}}">{{name}}</a></li>
@@ -501,4 +492,3 @@ puts Lupinus.render(template_text, context,{'hello'=>'{{name}}'})
 # EOF
 # context = JSON.parse(context_text)
 # puts Lupinus.render(template_text, context) 
-
