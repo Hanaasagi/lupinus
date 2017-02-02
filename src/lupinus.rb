@@ -42,18 +42,18 @@ class Lupinus
     contexts = [context]
 
     if not partials.instance_of? Hash
-      raise Exception
+      raise TypeError, 'partials must be Hash type'
     end
 
-    Render::inner_render(template, contexts, partials)
+    Render::render(template, contexts, partials)
   end
 
   class Render
 
-    def self.inner_render(template, contexts, partials)
+    def self.render(template, contexts, partials)
       delimiters = delimiters ? delimiters : $DEFAULT_DELIMITERS
       root = compiled(template, delimiters)
-      root._render(contexts, partials)
+      root.render(contexts, partials)
     end
 
     def self.standalone?(text, start, end_)
@@ -294,69 +294,70 @@ class Lupinus
     end
 
     def render_child(contexts, partials)
-      rtn = []
-      for child in @child
 
-        rtn << child._render(contexts, partials)
-      end
-      return rtn.join
+      @child.map{ |child|
+        child.render(contexts, partials)
+      }.join
+
     end
 
-    def render(contexts, partials={})
-      contexts = [contexts]
-      return _render(contexts, partials)
+    def render
+      raise NotImplementedError, 'render method should be implement in subclass'
     end
+
   end
 
   class Root < Token
 
     def initialize(*args)
       super(*args)
-      @type_string = "R"
+      @type = "R"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       return render_child(contexts, partials)
     end
+
   end
 
   class Literal < Token
 
     def initialize(*arg)
       super(*arg)
-      @type_string = "L"
+      @type = "L"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       return escape(@value)
     end
+
   end
 
   class Variable < Token
 
     def initialize(*args)
       super(*args)
-      @type_string = "V"
+      @type = "V"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       value = _look_up(@value, contexts)
-
       if (defined? value) == "method"
-        value = inner_render(value(), contexts, partials)
+        value = Render::render(value(), contexts, partials)
       end
       return escape(value)
     end
+
   end
 
   class Section < Token
 
     def initialize(*args)
       super(*args)
-      @type_string = "S"
+      @type = "S"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       val = _look_up(@value, contexts)
       if not val
         return $EMPTYSTRING
@@ -375,7 +376,7 @@ class Lupinus
         return escape(rtn.join(""))
       elsif (defined? val) == "method"
         new_template = val(@text)
-        value = inner_render(new_template, contexts, partials)
+        value = Render::render(new_template, contexts, partials)
       else
         contexts << val
         value = render_child(contexts, partials)
@@ -383,50 +384,55 @@ class Lupinus
       end
       return escape(value)
     end
+
   end
 
   class Inverted < Token
 
     def initialize(*arg)
       super(*arg)
-      @type_string = "I"
+      @type = "I"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       val = _look_up(@value, contexts)
       if val
         return $EMPTYSTRING
       end
       return render_child(contexts, partials)
     end
+
   end
 
   class Comment < Token
 
     def initialize(*arg)
       super(*arg)
-      @type_string = "C"
+      @type = "C"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       return $EMPTYSTRING
     end
+
   end
 
   class Partial < Token
 
     def initialize(*arg)
       super(*arg)
-      @type_string = "P"
+      @type = "P"
     end
 
-    def _render(contexts, partials)
+    def render(contexts, partials)
       partial = partials[@value]
 
       # !!!
-      return Render::inner_render(partial, contexts, partials)
+      return Render::render(partial, contexts, partials)
     end
+
   end
+
 end
 
 
@@ -492,3 +498,4 @@ puts Lupinus.render(template_text, context,{'hello'=>'{{name}}'})
 # EOF
 # context = JSON.parse(context_text)
 # puts Lupinus.render(template_text, context) 
+
