@@ -23,10 +23,11 @@ class Lupinus
 
   $DEFAULT_DELIMITERS = ["{{", "}}"]
   $EMPTYSTRING = ""
-  $WHITESPACE = " \t\r\b\f"
+  $WHITESPACE = " \t\r\b\f\v"
 
   $re_space = Regexp.new("[" + $WHITESPACE + "]*(\n|$)")
-  $re_tag = Regexp.new(format('%s([;#/!>r{]?)\s*(.*?)\s*([}]?)%s', *$DEFAULT_DELIMITERS), Regexp::MULTILINE)
+  $re_tag = Regexp.new(format('%s([;#/!>r{]?)\s*(.*?)\s*([}]?)%s', *$DEFAULT_DELIMITERS),
+                       Regexp::MULTILINE)
 
   $filters = {}
   $filters['upcase'] = lambda {|s| s.upcase}
@@ -34,10 +35,21 @@ class Lupinus
   $filters['capitalize'] = lambda {|s| s.capitalize}
 
 
-  def self.render(template, context, partials={})
+  # instantiate an instance of this class and call `render` with passed args
+  #
+  # @param see `render` doc
+  # @return [String] : rendered template
+  def self.render(template, context, partials={}, delimiters=$DEFAULT_DELIMITERS)
+    $DEFAULT_DELIMITERS = delimiters
     new.render(template, context, partials)
   end
 
+  # push the context to stack and call `Render::render`
+  #
+  # @param  [String] template : template text
+  # @param  [Hash]   context  : Hash type data, e.g. {:name=>"ruby"}
+  # @param  [Hash]   partials : the extern template to include, e.g. {:header=>"{{title}}\n{{charaset}}"}
+  # @return [String]          : rendered template
   def render(template, context, partials)
     contexts = [context]
 
@@ -48,16 +60,29 @@ class Lupinus
     Render::render(template, contexts, partials)
   end
 
+  ##################################################
+  #############      Render Class      #############
+  ##################################################
   class Render
 
+    # parse the template and render
+    # 
+    # @param  [String] template : template text
+    # @param  [Array]  contexts : an Array contain Hash type data, e.g. [{:name=>"Ruby"}]
+    # @param  [Hash]   partials : extern template
+    # @return [String]          : rendered template
     def self.render(template, contexts, partials)
-      delimiters = delimiters ? delimiters : $DEFAULT_DELIMITERS
-      root = compiled(template, delimiters)
+      root = parse(template)
       root.render(contexts, partials)
     end
 
+    # standalone means a line that the tag 'left and right is blank
+    #
+    # @param  [String]  text  : template text
+    # @param  [Integer] start : the tag start index
+    # @param  [Integer] end_  : the tag end index
+    # @return [Array]         : the line start position and end position
     def self.standalone?(text, start, end_)
-      # 
       left = true
       right = text.match($re_space, end_)
 
@@ -77,15 +102,19 @@ class Lupinus
       end
     end
 
-    def self.compiled(template, delimiters=$DEFAULT_DELIMITERS)
+    # parse the template and generate the syntax tree
+    #
+    # @param  [String] template : template text
+    # @return [Root]            ： the root of syntax tree
+    def self.parse(template)
 
       tokens = []
       index = 0
       sections = []
       tokens_stack = []
+      delimiters=$DEFAULT_DELIMITERS
 
       root = Root.new "root"
-      root.filters = $filters.clone
 
       while (m = $re_tag.match(template, index))
         token = nil
@@ -97,18 +126,19 @@ class Lupinus
           tokens << last_literal
         end
 
+        # {{[prefix] [name] [suffix]}}
         prefix, name, suffix = m.captures()
 
-        if prefix == "r"
+        if prefix == "" && suffix == ""
+          # {{ name }}
+          token = Variable.new(name, name, root=root)
+          token.escape = true
+
+        elsif prefix == "r"
           # {{r name }}
           # raw string
           token = Variable.new(name, name, root=root)
           token.escape = false
-
-        elsif prefix == "" && suffix == ""
-          # {{ name }}
-          token = Variable.new(name, name, root=root)
-          token.escape = true
 
         elsif prefix == ";"
           # {{; comment }}
@@ -118,8 +148,10 @@ class Lupinus
           end
 
         elsif prefix == ">"
+          # {{> partial }}
           token = Partial.new(name, name, root=root)
           strip_space = true
+          # get the offset of the line where the tag is located
           pos = standalone?(template, m.begin(0), m.end(0))
           if pos
             token.indent = template[pos[0], m.begin(0)].length
@@ -183,8 +215,13 @@ class Lupinus
     end
   end
 
+  # look up the context stack
+  #
+  # @param  [String]    var_name : the key of Hash
+  # @param  [Array]     contexts : contain the Hash data
+  # @param  [Integer]   start    : the start index
+  # @return [uncertain]          : Maybe return an Array or String or other ...
   def self.lookup(var_name, contexts=[], start=0)
-    # look up the context stack
     if start >= 0
       start = contexts.length
     end
@@ -202,23 +239,24 @@ class Lupinus
   ##################################################
   class Token
 
-    attr_accessor :filters, :name, :value, :text, :child, \
+    attr_accessor :name, :value, :text, :child, \
                   :escape, :delimiter, :indent, :root
     
-    def initialize(name, value=nil, root=nil, child=nil, text="")
+    def initialize(name, value=nil, root=nil, child=nil)
       @name = name
       @value = value
-      @text = text
       @child = child
       @escape = false
       @delimiter = nil
       @indent = 0
       @root = root
-      @filters = {}
     end
 
+    # escape the text if @escape is true
+    #
+    # @param  [String] text :
+    # @return [String]      : 
     def escape(text)
-      # escape
       if @escape
         CGI.escapeHTML text
       else
@@ -226,6 +264,11 @@ class Lupinus
       end
     end
 
+    # 
+    #
+    # @param
+    # @param
+    # @return
     def _look_up(dot_name, contexts)
       list = dot_name.split("|").map(&:strip)
       dot_name = list[0]
@@ -275,30 +318,29 @@ class Lupinus
         end
       end
 
+      pass_filter(value,filters)
+    end
+
+    # filter the valu
+    def pass_filter(value, filters)
       for f in filters
-        if @root.filters.has_key? f
-          func = @root.filters[f]
+        if $filters.has_key? f
+          func = $filters[f]
           begin
             value = func.call value
-          rescue
-            raise Exception
+          rescue => err
+            puts err
+            exit()
           end
         end
       end
-
-      return value
-    end
-
-    def exec_filter(value, filters)
-
+      return value   
     end
 
     def render_child(contexts, partials)
-
       @child.map{ |child|
         child.render(contexts, partials)
       }.join
-
     end
 
     def render
@@ -488,5 +530,4 @@ context_text = <<~EOF
 EOF
 
 context = JSON.parse(context_text)
-puts Lupinus.render(template_text, context) 
-
+puts  Lupinus.render(template_text, context)
