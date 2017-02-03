@@ -4,7 +4,7 @@ require "cgi"
 
 module StringExtensions
   refine String do
-    # an extension that can strip other chars
+    # add the patch that can strip other chars
     def strip(chars=nil)
       if chars
         chars = Regexp.escape(chars)
@@ -13,6 +13,25 @@ module StringExtensions
         super()
       end
     end
+
+    def rstrip(chars=nil)
+      if chars
+        chars = Regexp.escape(chars)
+        self.gsub(/[#{chars}]+\z/, "")
+      else
+        super()
+      end
+    end
+
+    def lstrip(chars=nil)
+      if chars
+        chars = Regexp.escape(chars)
+        self.gsub(/\A[#{chars}]/, "")
+      else
+        super()
+      end
+    end
+
   end
 end
 
@@ -28,6 +47,7 @@ class Lupinus
   $re_space = Regexp.new("[" + $WHITESPACE + "]*(\n|$)")
   $re_tag = Regexp.new(format('%s([;#/!>r{]?)\s*(.*?)\s*([}]?)%s', *$DEFAULT_DELIMITERS),
                        Regexp::MULTILINE)
+  $re_indent = Regexp.new('(^|\n)(?=.|\n)', Regexp::MULTILINE)
 
   $filters = {}
   $filters['upcase'] = lambda {|s| s.upcase}
@@ -44,7 +64,7 @@ class Lupinus
     new.render(template, context, partials)
   end
 
-  # push the context to stack and call `Render::render`
+  # push the context to stack and call `Template::render`
   #
   # @param  [String] template : template text
   # @param  [Hash]   context  : Hash type data, e.g. {:name=>"ruby"}
@@ -57,13 +77,13 @@ class Lupinus
       raise TypeError, 'partials must be Hash type'
     end
 
-    Render::render(template, contexts, partials)
+    Template::render(template, contexts, partials)
   end
 
   ##################################################
-  #############      Render Class      #############
+  ############      Template Class      ############
   ##################################################
-  class Render
+  class Template
 
     # parse the template and render
     # 
@@ -120,8 +140,9 @@ class Lupinus
         token = nil
         last_literal = nil
         strip_space = false
-
+        # puts m.begin(0)
         if m.begin(0) > index
+          # print "-" * 10 + template[index..m.begin(0)-1], "-" * 10, "\n"
           last_literal = Literal.new("str", template[index..m.begin(0)-1], root=root)
           tokens << last_literal
         end
@@ -133,12 +154,13 @@ class Lupinus
           # {{ name }}
           token = Variable.new(name, name, root=root)
           token.escape = true
+          tokens << token
 
         elsif prefix == "r"
           # {{r name }}
-          # raw string
           token = Variable.new(name, name, root=root)
           token.escape = false
+          tokens << token
 
         elsif prefix == ";"
           # {{; comment }}
@@ -146,6 +168,7 @@ class Lupinus
           if sections.length <= 0
             strip_space = true
           end
+          tokens << token
 
         elsif prefix == ">"
           # {{> partial }}
@@ -154,8 +177,9 @@ class Lupinus
           # get the offset of the line where the tag is located
           pos = standalone?(template, m.begin(0), m.end(0))
           if pos
-            token.indent = template[pos[0], m.begin(0)].length
+            token.indent = template[pos[0]..m.begin(0)].length - 1
           end
+          tokens << token
 
         elsif prefix == "#" || prefix == "!"
           sec_name = name.split("|")[0].strip
@@ -164,11 +188,10 @@ class Lupinus
           else
             token = Inverted.new(name, name, root=root)
           end
-          token.delimiter = delimiters
-          tokens << token
 
-          token = nil
+          tokens << token
           tokens_stack << tokens
+
           tokens = []
 
           sections << [sec_name, prefix, m.end(0)]
@@ -177,22 +200,16 @@ class Lupinus
         elsif prefix == "/"
           tag_name, sec_type, text_end = sections.pop
           if tag_name != name
-            raise SyntaxError, ""
+            raise SyntaxError, "Tag is not matched"
           end
-          child = tokens
-          tokens = tokens_stack.pop()
 
-          tokens[-1].text = template[text_end, m.begin(0)]
+          child, tokens = tokens, tokens_stack.pop()
+
           tokens[-1].child = child
           strip_space = true
         
         else
           raise SyntaxError, "Unkown tag"
-        
-        end
-
-        if token
-          tokens << token
         end
 
         index = m.end(0)
@@ -202,37 +219,44 @@ class Lupinus
           if pos
             index = pos[1]
             if last_literal
-              last_literal.value = last_literal.value.strip($WHITESPACE)
+              last_literal.value = last_literal.value.rstrip($WHITESPACE)
             end
           end
         end
-      end
+
+      end # end while
 
       tokens << Literal.new("str", template[index..-1])
 
       root.child = tokens
+
       return root
     end
   end
 
-  # look up the context stack
-  #
-  # @param  [String]    var_name : the key of Hash
-  # @param  [Array]     contexts : contain the Hash data
-  # @param  [Integer]   start    : the start index
-  # @return [uncertain]          : Maybe return an Array or String or other ...
-  def self.lookup(var_name, contexts=[], start=0)
-    if start >= 0
-      start = contexts.length
-    end
 
-    for context in contexts[0..start].reverse
-      if (context.instance_of? Hash) && (context.has_key? var_name)
-        return context[var_name]
+  class Context
+
+    # look up the context stack
+    #
+    # @param  [String]    var_name : the key of Hash
+    # @param  [Array]     contexts : contain the Hash data
+    # @param  [Integer]   start    : the start index e.g. ../ will be -1
+    # @return [uncertain]          : Maybe return an Array or String or other ...
+    def self.lookup(var_name, contexts=[], start=0)
+      if start >= 0
+        start = contexts.length
       end
+
+      for context in contexts[0..start-1].reverse
+        if (context.instance_of? Hash) && (context.has_key? var_name)
+          return context[var_name]
+        end
+      end
+      return nil
     end
-    return nil
   end
+
 
   ##################################################
   #############    Token Base Class    #############
@@ -264,26 +288,28 @@ class Lupinus
       end
     end
 
-    # 
+    # find the value according to the name
     #
-    # @param
-    # @param
+    # @param  [String] name     :       e.g. "../name1.name2 | upcase"
+    # @param  [Array]  contexts :    
     # @return
-    def _look_up(dot_name, contexts)
-      list = dot_name.split("|").map(&:strip)
-      dot_name = list[0]
-      filters = list[1..-1]
+    def lookup(name, contexts)
+      arr = name.split("|").map(&:strip)
+      name = arr[0]
+      filters = arr[1..-1]
 
-      if not dot_name.start_with?(".")
-        dot_name = "./" + dot_name
+      # format
+      if not name.start_with?(".")
+        name = "./" + name
       end
 
-      paths = dot_name.split("/")
+      paths = name.split("/")
       last_path = paths[-1]
 
       refer_context = last_path == "" or last_path == "." or last_path == ".."
       paths = refer_context ? paths : paths[0..-2]
 
+      # calculate the path level
       level = 0
       for path in paths
         if path == ".."
@@ -295,25 +321,25 @@ class Lupinus
 
       names = last_path.split(".")
 
-      if refer_context || names[0] == ""
+      if refer_context || names[0] == ''
         begin
           value = contexts[level-1]
         rescue
           value = nil
         end
       else
-        value = Lupinus::lookup(names[0], contexts, level)
+        value = Context::lookup(names[0], contexts, level)
       end
 
       if not refer_context
         for name in names[1..-1]
-          begin
-            index = name.to_i
-            name = value.instance_of? Array ? name.to_i : name
+          if value.instance_of? Array
+            # index should be Integer type
+            value = value[name.to_i]
+          elsif value.instance_of? Hash
             value = value[name]
-          rescue
+          else
             value = nil
-            break
           end
         end
       end
@@ -321,7 +347,11 @@ class Lupinus
       pass_filter(value,filters)
     end
 
-    # filter the valu
+    # pass value the value to filter
+    #
+    # @param  [String] value   : value
+    # @param  [Array]  filters : the key of $filters
+    # @return [String]         : value after filter
     def pass_filter(value, filters)
       for f in filters
         if $filters.has_key? f
@@ -337,18 +367,27 @@ class Lupinus
       return value   
     end
 
+    # call child token `render` method and join the result
+    #
+    # @param  [Array]  contexts :
+    # @param  [Hash]   partials :
+    # @return [String]
     def render_child(contexts, partials)
       @child.map{ |child|
         child.render(contexts, partials)
       }.join
     end
 
+    # abstract method
     def render
       raise NotImplementedError, 'render method should be implement in subclass'
     end
 
   end
 
+  ##################################################
+  #############    Token type Class    #############
+  ##################################################
   class Root < Token
 
     def initialize(*args)
@@ -383,7 +422,7 @@ class Lupinus
     end
 
     def render(contexts, partials)
-      value = _look_up(@value, contexts)
+      value = lookup(@value, contexts)
       return escape(value)
     end
 
@@ -397,7 +436,7 @@ class Lupinus
     end
 
     def render(contexts, partials)
-      var = _look_up(@value, contexts)
+      var = lookup(@value, contexts)
       if not var
         return $EMPTYSTRING
       end
@@ -429,7 +468,7 @@ class Lupinus
     end
 
     def render(contexts, partials)
-      var = _look_up(@value, contexts)
+      var = lookup(@value, contexts)
       if var === false or var === [] or var === {}
         return render_child(contexts, partials)
       end
@@ -460,74 +499,14 @@ class Lupinus
 
     def render(contexts, partials)
       partial = partials[@value]
-
-      # !!!
-      return Render::render(partial, contexts, partials)
+                .sub($re_indent, "\\1" + " " * @indent)
+      if not partial.end_with? "\n"
+        partial = partial + "\n"
+      end
+      return Template::render(partial, contexts, partials)
     end
 
   end
 
 end
 
-
-
-# test
-require "json"
-template_text = <<~EOF
-<h1>Today{{; ignore me }}.</h1>
-<h1>{{ header }}</h1>
-{{# bug }}
-{{/ bug }}
-
-{{# items }}
-  {{# first }}
-    <li><strong>{{name | upcase}}</strong></li>
-  {{/ first }}
-  {{# link }}
-    <li><a href="{{url}}">{{name}}</a></li>
-  {{/ link }}
-{{/ items }}
-
-{{! empty }}
-  <p>The list is empty.</p>
-{{/ empty }}
-{{> hello }}
-EOF
-
-context_text = <<~EOF
-{
-  "header": "Colors",
-  "items": [
-      {"name": "red", "first": true, "url": "#Red"},
-      {"name": "green", "link": true, "url": "#Green"},
-      {"name": "blue", "link": true, "url": "#Blue"}
-  ],
-  "empty": false,
-  "hello": "{{ name }}",
-  "name" : "miziha"
-}
-EOF
-
-context = JSON.parse(context_text)
-puts Lupinus.render(template_text, context,{'hello'=>'{{name}}'}) 
-
-
-print '-' * 10, 'END', '-' * 10, "\n"
-
-template_text = <<~EOF
-{{#repo}}
-  <b></b>
-{{/repo}}
-{{!repo}}
-  No repos :(
-{{/repo}}
-EOF
-
-context_text = <<~EOF
-{
-  "repo": []
-}
-EOF
-
-context = JSON.parse(context_text)
-puts  Lupinus.render(template_text, context)
