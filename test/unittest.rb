@@ -6,7 +6,7 @@ class LupinusTest < MiniTest::Unit::TestCase
 
 
   def test_normal_text
-    template = "Hello I'm Hanaasagi"
+    template = "Hello\tWorld\n"
     assert_equal template, Lupinus.render(template, {})
   end
 
