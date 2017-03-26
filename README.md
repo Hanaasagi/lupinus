@@ -7,7 +7,7 @@ Ruby template similar to Mustache
     ＼│　　∪
 
 
-###Quick example
+### Quick example
 
 Now you have following template:  
 
@@ -46,11 +46,11 @@ will return following text
 	    <li><strong>salad</strong>&nbsp;0 USD</li>
 
 
-###Usage  
+### Usage  
 
 There are no if statements, else clauses, or for loops. Instead there are only tags. Some tags are replaced with a value, some nothing, and others a series of values. following document explains the different tag types.
 
-####Variables  
+#### Variables  
 `{{ name }}` tag will try to find the name key in the current context and replace.  
  All the variables are HTML escaped by default. If you want to return raw text, use `{{r name }}`
  
@@ -74,7 +74,7 @@ Output
 	19
 	my homepage is <a>...</a> 
 
-####Sections  
+#### Sections  
 `{{# name }}` `{{/ name }}` is considered as sections.
 Sections render blocks of text one or more times, depending on the value of the key in the current context. If the key exists and has a value of false or an empty list, the HTML in sections will not be displayed. Besides, an inverted section begins with `{{! name }}`.  If the key doesn't exist, is false, or is empty, the sections' inner HTML will be displayed.
 
@@ -102,11 +102,11 @@ Output
     blake
     yang
 
-####Comments
+#### Comments
 `{{! this is comment tag}}`
 
 
-####Partials  
+#### Partials  
 
 `{{> name }}` will load extern template and render
 
@@ -130,5 +130,5 @@ Output
 
     <title>Index Page</title>
 
-###License  
+### License  
 MIT License  
