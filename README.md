@@ -1,11 +1,12 @@
 # lupinus  
 Ruby template similar to Mustache  
 
+```
      ∩
     ⊂○⊃　∩
      ∪　⊂○⊃
-    ＼│　　∪
-
+   ＼│　 ∪
+```
 
 ### Quick example
 
